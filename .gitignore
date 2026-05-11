@@ -1,6 +1,7 @@
 # Python cache
 __pycache__/
 *.pyc
+.venv/
 
 # Log files
 *.log
@@ -13,3 +14,4 @@ Ultralytics/
 *.jpg
 *.jpeg
 *.txt
+!requirements.txt

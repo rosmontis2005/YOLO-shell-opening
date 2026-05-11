@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHOT_DIR = PROJECT_ROOT / "shot"
 MAX_CAMERA_INDEX = 10
 
@@ -15,7 +15,11 @@ MAX_CAMERA_INDEX = 10
 def probe_camera(index: int) -> dict:
     import cv2
 
-    backend = cv2.CAP_DSHOW if hasattr(cv2, "CAP_DSHOW") else cv2.CAP_ANY
+    backend = (
+        cv2.CAP_DSHOW
+        if sys.platform.startswith("win") and hasattr(cv2, "CAP_DSHOW")
+        else cv2.CAP_ANY
+    )
     cap = cv2.VideoCapture(index, backend)
 
     result = {

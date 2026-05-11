@@ -1,0 +1,4 @@
+# Python >= 3.10 is required by this project.
+ultralytics==8.4.12
+opencv-python==4.13.0.92
+pyserial==3.5

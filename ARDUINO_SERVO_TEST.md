@@ -1,7 +1,7 @@
 ﻿# YOLO 检测结果驱动 Arduino 舵机（0° / 90°）
 
 ## 1. 结论先说
-Arduino 不能直接运行或调用 `test.py`。
+Arduino 不能直接运行或调用电脑上的 Python 检测脚本。
 
 推荐结构是：
 - 电脑运行 Python（拍照 + YOLO 检测）
@@ -9,9 +9,9 @@ Arduino 不能直接运行或调用 `test.py`。
 - Arduino 收到命令后控制舵机
 
 本仓库已经准备好：
-- `test.py`：支持 `--json` 输出检测结果
-- `control_servo.py`：运行检测并把结果发给 Arduino
-- `arduino/servo_detect_test/servo_detect_test.ino`：Arduino 舵机控制程序
+- `camera_tests/yolo_single_detect.py`：支持 `--json` 输出检测结果
+- `control_flows/servo_open_close.py`：运行检测并把结果发给 Arduino
+- `firmware/servo_open_close/servo_open_close.ino`：Arduino 舵机控制程序
 
 ## 2. Arduino 接线（以 UNO + SG90 为例）
 - 舵机信号线（橙/黄） -> D9
@@ -23,7 +23,7 @@ Arduino 不能直接运行或调用 `test.py`。
 ## 3. 烧录 Arduino 程序
 1. 打开 Arduino IDE
 2. `File -> Open`，选择：
-   `arduino/servo_detect_test/servo_detect_test.ino`
+   `firmware/servo_open_close/servo_open_close.ino`
 3. `Tools -> Board` 选择你的开发板（如 Arduino Uno）
 4. `Tools -> Port` 选择对应串口（如 COM3）
 5. 点击 `Upload`
@@ -38,7 +38,7 @@ pip install pyserial ultralytics opencv-python
 
 ## 5. 先测试检测脚本（可选）
 ```powershell
-python test.py --json
+python camera_tests/yolo_single_detect.py --json
 ```
 
 会输出类似：
@@ -49,12 +49,12 @@ python test.py --json
 ## 6. 一键联动测试
 ### 6.1 查看串口
 ```powershell
-python control_servo.py --list-ports
+python control_flows/servo_open_close.py --list-ports
 ```
 
 ### 6.2 运行一次检测并控制舵机
 ```powershell
-python control_servo.py --port COM3 --baud 9600 --camera-index 1
+python control_flows/servo_open_close.py --port COM3 --baud 9600 --camera-index 1
 ```
 
 逻辑：
@@ -64,20 +64,20 @@ python control_servo.py --port COM3 --baud 9600 --camera-index 1
 默认发送后会保持串口打开 3 秒，方便观察舵机是否动作：
 
 ```powershell
-python control_servo.py --port COM3 --baud 9600 --camera-index 1 --hold-seconds 5
+python control_flows/servo_open_close.py --port COM3 --baud 9600 --camera-index 1 --hold-seconds 5
 ```
 
 ### 6.3 绕过 YOLO，直接测试舵机/串口
 如果检测结果正常但舵机不动，先直接发舵机命令：
 
 ```powershell
-python control_servo.py --port COM3 --baud 9600 --force-command 1 --hold-seconds 5
+python control_flows/servo_open_close.py --port COM3 --baud 9600 --force-command 1 --hold-seconds 5
 ```
 
 应该转到 90°。
 
 ```powershell
-python control_servo.py --port COM3 --baud 9600 --force-command 0 --hold-seconds 5
+python control_flows/servo_open_close.py --port COM3 --baud 9600 --force-command 0 --hold-seconds 5
 ```
 
 应该回到 0°。
@@ -86,10 +86,10 @@ python control_servo.py --port COM3 --baud 9600 --force-command 0 --hold-seconds
 
 ### 6.4 只做检测不发串口
 ```powershell
-python control_servo.py --dry-run --camera-index 1
+python control_flows/servo_open_close.py --dry-run --camera-index 1
 ```
 
-## 7. 你问的“C++ 程序能调用 test.py 吗？”
+## 7. 你问的“C++ 程序能调用 Python 检测脚本吗？”
 可以，但那是“电脑上的 C++ 程序”调用 Python 进程，不是“Arduino 上的 C++”。
 
 当前方案已经是最简、最稳定的验证路径：

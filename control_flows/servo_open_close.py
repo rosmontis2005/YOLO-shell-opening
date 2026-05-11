@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
@@ -117,13 +117,13 @@ def print_ports() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run test.py once and send servo command to Arduino."
+        description="Run YOLO detection once and send an open/close command to Arduino."
     )
     parser.add_argument("--port", help="Serial port, e.g. COM3")
     parser.add_argument("--baud", type=int, default=9600)
     parser.add_argument("--camera-index", type=int, default=1)
     parser.add_argument("--conf", type=float, default=0.1)
-    parser.add_argument("--detect-script", default="test.py")
+    parser.add_argument("--detect-script", default="camera_tests/yolo_single_detect.py")
     parser.add_argument(
         "--force-command",
         choices=("0", "1"),
