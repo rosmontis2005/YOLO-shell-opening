@@ -14,6 +14,11 @@ from common import detect_loop, stepper_control
 from control_flows import stepper_follow_target
 
 
+STATE_DETECT = 0
+STATE_MOTOR1_CORRECT = 1
+STATE_MOTOR2_CYCLE = 2
+
+
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(errors="replace")
@@ -43,8 +48,8 @@ def send_raw_command(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Wait for a target, enter a work cycle, use motor 1 to correct "
-            "position until centered, then run motor 2 out and back."
+            "Run a three-state detector/controller: 0 detects and decides, "
+            "1 corrects motor 1, 2 runs motor 2 out and back."
         )
     )
     parser.add_argument("--camera-index", type=int, default=1)
@@ -107,11 +112,11 @@ def parse_args() -> argparse.Namespace:
         "--once",
         action="store_true",
         help=(
-            "Run one idle check if no target is found, or one full work cycle "
-            "if a target is found."
+            "Run one state-0 detection, including the selected state-1 or "
+            "state-2 action if a target is found."
         ),
     )
-    parser.add_argument("--json", action="store_true", help="Print JSON result each step.")
+    parser.add_argument("--json", action="store_true", help="Print JSON result each state step.")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -138,13 +143,11 @@ def capture_detection(args: argparse.Namespace, model: detect_loop.YOLO, cap) ->
 def prepare_result(
     result: dict,
     args: argparse.Namespace,
-    work_state: bool,
-    work_cycle_id: int | None,
-    correction_index: int | None,
+    state: int,
+    action_cycle_id: int | None,
 ) -> dict:
-    result["work_state"] = work_state
-    result["work_cycle_id"] = work_cycle_id
-    result["correction_index"] = correction_index
+    result["state"] = state
+    result["action_cycle_id"] = action_cycle_id
     result["target_x"] = args.target_x
     result["tolerance"] = args.tolerance
     result["x_error"] = (
@@ -154,6 +157,7 @@ def prepare_result(
     result["aux_steps"] = None
     result["double_decision"] = "not_detected"
     result["state_transition"] = None
+    result["serial_status"] = None
     return result
 
 
@@ -169,22 +173,21 @@ def print_or_emit_result(args: argparse.Namespace, result: dict) -> None:
 def print_result(result: dict, dry_run: bool) -> None:
     timestamp = result["timestamp"]
     if not result["detected"]:
-        if result.get("work_state"):
-            print(f"[{timestamp}] Work state active; target not detected, retrying")
-        else:
-            print(f"[{timestamp}] Work state idle; no target detected")
+        print(f"[{timestamp}] State {result['state']}: no target detected")
         print(f"Input frame saved to: {result['input_frame']}")
         return
 
     print(
-        f"[{timestamp}] Target x={result['x_center']:.2f}, "
+        f"[{timestamp}] State {result['state']}: target x={result['x_center']:.2f}, "
         f"error={result['x_error']:.2f}, confidence={result['confidence']:.4f}, "
-        f"work_state={result['work_state']}, decision={result['double_decision']}"
+        f"decision={result['double_decision']}"
     )
     print(f"Input frame saved to: {result['input_frame']}")
     print(f"Output saved to: {result['output_frame']}")
     if result.get("state_transition"):
         print(f"State transition: {result['state_transition']}")
+    if result.get("serial_status"):
+        print(f"Serial status: {result['serial_status']}")
 
     if not result.get("stepper_command"):
         print("No stepper command needed")
@@ -208,11 +211,13 @@ def run_motor1_correction(
     ).strip()
     result["stepper_command"] = command
     if args.dry_run:
+        result["serial_status"] = "dry_run"
         return
 
     sent_command, replies = serial_client.send(steps)
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
+    result["serial_status"] = classify_serial_status(replies)
 
 
 def run_motor2_cycle(
@@ -228,81 +233,30 @@ def run_motor2_cycle(
     result["aux_steps"] = aux_steps
     result["stepper_command"] = command
     if args.dry_run:
+        result["serial_status"] = "dry_run"
         return
 
     sent_command, replies = send_raw_command(serial_client, command)
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
+    result["serial_status"] = classify_serial_status(replies)
 
 
-def run_work_cycle(
-    args: argparse.Namespace,
-    model: detect_loop.YOLO,
-    cap,
-    serial_client: stepper_control.StepperSerialClient | None,
-    initial_result: dict,
-    work_cycle_id: int,
-) -> None:
-    result = initial_result
-    correction_count = 0
-    first_work_step = True
-
-    while True:
-        prepare_result(
-            result=result,
-            args=args,
-            work_state=True,
-            work_cycle_id=work_cycle_id,
-            correction_index=correction_count,
-        )
-        if first_work_step:
-            result["state_transition"] = "work_state:false->true"
-            first_work_step = False
-
-        if not result["detected"]:
-            result["double_decision"] = "work_target_lost_retry_detection"
-            print_or_emit_result(args=args, result=result)
-            time.sleep(args.interval_seconds)
-            result = capture_detection(args=args, model=model, cap=cap)
-            continue
-
-        steps, decision = stepper_follow_target.choose_relative_steps(
-            x_center=float(result["x_center"]),
-            target_x=args.target_x,
-            tolerance=args.tolerance,
-            step_size=args.step_size,
-            invert_direction=args.invert_direction,
-        )
-        result["relative_steps"] = steps
-
-        if steps == 0:
-            result["double_decision"] = "target_reached_run_motor2_cycle"
-            run_motor2_cycle(args=args, result=result, serial_client=serial_client)
-            result["work_state"] = False
-            result["state_transition"] = "work_state:true->false"
-            print_or_emit_result(args=args, result=result)
-            return
-
-        correction_count += 1
-        result["correction_index"] = correction_count
-        result["double_decision"] = f"correct_motor1_{decision}"
-        run_motor1_correction(
-            args=args,
-            result=result,
-            steps=steps,
-            serial_client=serial_client,
-        )
-        print_or_emit_result(args=args, result=result)
-
-        time.sleep(args.interval_seconds)
-        result = capture_detection(args=args, model=model, cap=cap)
+def classify_serial_status(replies: list[str]) -> str:
+    if not replies:
+        return "timeout"
+    if any(reply.startswith("OK:") for reply in replies):
+        return "ok"
+    if any(reply.startswith("ERR:") for reply in replies):
+        return "error_reply"
+    return "unknown_reply"
 
 
 def run(args: argparse.Namespace) -> None:
     weights_path = Path(args.weights).resolve() if args.weights else detect_loop.find_latest_weights()
     serial_client = None
-    work_state = False
-    work_cycle_id = 0
+    state = STATE_DETECT
+    action_cycle_id = 0
 
     log(f"Loading YOLO weights once: {weights_path}", args.json)
     model = detect_loop.YOLO(str(weights_path))
@@ -323,13 +277,13 @@ def run(args: argparse.Namespace) -> None:
                 log(f"Arduino reply: {reply}", args.json)
 
         while True:
+            state = STATE_DETECT
             result = capture_detection(args=args, model=model, cap=cap)
             prepare_result(
                 result=result,
                 args=args,
-                work_state=work_state,
-                work_cycle_id=None,
-                correction_index=None,
+                state=state,
+                action_cycle_id=None,
             )
 
             if not result["detected"]:
@@ -341,17 +295,36 @@ def run(args: argparse.Namespace) -> None:
                 time.sleep(args.interval_seconds)
                 continue
 
-            work_state = True
-            work_cycle_id += 1
-            run_work_cycle(
-                args=args,
-                model=model,
-                cap=cap,
-                serial_client=serial_client,
-                initial_result=result,
-                work_cycle_id=work_cycle_id,
+            steps, decision = stepper_follow_target.choose_relative_steps(
+                x_center=float(result["x_center"]),
+                target_x=args.target_x,
+                tolerance=args.tolerance,
+                step_size=args.step_size,
+                invert_direction=args.invert_direction,
             )
-            work_state = False
+            result["relative_steps"] = steps
+            action_cycle_id += 1
+            result["action_cycle_id"] = action_cycle_id
+
+            if steps == 0:
+                state = STATE_MOTOR2_CYCLE
+                result["state"] = state
+                result["state_transition"] = "0->2->0"
+                result["double_decision"] = "target_in_range_run_motor2_cycle"
+                run_motor2_cycle(args=args, result=result, serial_client=serial_client)
+                print_or_emit_result(args=args, result=result)
+            else:
+                state = STATE_MOTOR1_CORRECT
+                result["state"] = state
+                result["state_transition"] = "0->1->0"
+                result["double_decision"] = f"target_out_of_range_correct_motor1_{decision}"
+                run_motor1_correction(
+                    args=args,
+                    result=result,
+                    steps=steps,
+                    serial_client=serial_client,
+                )
+                print_or_emit_result(args=args, result=result)
 
             if args.once:
                 break
