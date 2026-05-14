@@ -1,3 +1,5 @@
+#include <Servo.h>
+
 const int M1_STEP_PIN = 3;
 const int M1_DIR_PIN = 2;
 const int M1_EN_PIN = 4;
@@ -6,11 +8,17 @@ const int M2_STEP_PIN = 6;
 const int M2_DIR_PIN = 5;
 const int M2_EN_PIN = 7;
 
+const int SERVO_PIN = 9;
+const int SERVO_MIN_DEG = 0;
+const int SERVO_MAX_DEG = 180;
+const int SERVO_STEP_DELAY_MS = 15;
+
 const bool M1_DIR_RIGHT = false;
 const bool M2_DIR_OUT = true;
 const int PULSE_US = 500;
 const long MAX_STEPS_PER_COMMAND = 100000;
 
+Servo sweepServo;
 String incoming;
 
 bool isSignedInteger(String value) {
@@ -61,6 +69,18 @@ void runMotor2Cycle(long oneWaySteps) {
 
   stepMotor(M2_STEP_PIN, M2_DIR_PIN, oneWaySteps, M2_DIR_OUT);
   stepMotor(M2_STEP_PIN, M2_DIR_PIN, oneWaySteps, !M2_DIR_OUT);
+}
+
+void runServoSweep() {
+  for (int pos = SERVO_MIN_DEG; pos <= SERVO_MAX_DEG; pos += 1) {
+    sweepServo.write(pos);
+    delay(SERVO_STEP_DELAY_MS);
+  }
+
+  for (int pos = SERVO_MAX_DEG; pos >= SERVO_MIN_DEG; pos -= 1) {
+    sweepServo.write(pos);
+    delay(SERVO_STEP_DELAY_MS);
+  }
 }
 
 void printErr(String message) {
@@ -115,6 +135,11 @@ void handleMotor2CycleCommand(String value) {
   Serial.println(oneWaySteps);
 }
 
+void handleServoSweepCommand() {
+  runServoSweep();
+  Serial.println("OK:SERVO:SWEEP");
+}
+
 void handleCommand(String cmd) {
   cmd.trim();
 
@@ -125,6 +150,11 @@ void handleCommand(String cmd) {
 
   if (cmd.startsWith("M2:CYCLE:")) {
     handleMotor2CycleCommand(cmd.substring(9));
+    return;
+  }
+
+  if (cmd == "SERVO:SWEEP" || cmd == "S3:SWEEP") {
+    handleServoSweepCommand();
     return;
   }
 
@@ -146,6 +176,9 @@ void setup() {
 
   digitalWrite(M1_EN_PIN, LOW);
   digitalWrite(M2_EN_PIN, LOW);
+  sweepServo.attach(SERVO_PIN);
+  sweepServo.write(SERVO_MIN_DEG);
+
   Serial.begin(9600);
   Serial.println("READY:DOUBLE_STEPPING");
 }

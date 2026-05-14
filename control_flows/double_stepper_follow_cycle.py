@@ -17,6 +17,7 @@ from control_flows import stepper_follow_target
 STATE_DETECT = 0
 STATE_MOTOR1_CORRECT = 1
 STATE_MOTOR2_CYCLE = 2
+STATE_SERVO_SWEEP = 3
 
 
 for stream in (sys.stdout, sys.stderr):
@@ -48,8 +49,9 @@ def send_raw_command(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a three-state detector/controller: 0 detects and decides, "
-            "1 corrects motor 1, 2 runs motor 2 out and back."
+            "Run a four-state detector/controller: 0 detects and decides, "
+            "1 corrects motor 1, 2 runs motor 2 out and back, "
+            "3 runs one servo sweep."
         )
     )
     parser.add_argument("--camera-index", type=int, default=1)
@@ -97,6 +99,11 @@ def parse_args() -> argparse.Namespace:
         help="Command template for motor 2 cycle. {position} is one-way steps.",
     )
     parser.add_argument(
+        "--servo-sweep-command",
+        default="SERVO:SWEEP",
+        help="Command sent in state 3 to run one servo sweep.",
+    )
+    parser.add_argument(
         "--startup-wait-seconds",
         type=float,
         default=2,
@@ -113,7 +120,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Run one state-0 detection, including the selected state-1 or "
-            "state-2 action if a target is found."
+            "state-2/state-3 action if a target is found."
         ),
     )
     parser.add_argument("--json", action="store_true", help="Print JSON result each state step.")
@@ -155,6 +162,8 @@ def prepare_result(
     )
     result["relative_steps"] = None
     result["aux_steps"] = None
+    result["servo_command"] = None
+    result["serial_actions"] = []
     result["double_decision"] = "not_detected"
     result["state_transition"] = None
     result["serial_status"] = None
@@ -191,7 +200,19 @@ def print_result(result: dict, dry_run: bool) -> None:
     if result.get("serial_elapsed_seconds") is not None:
         print(f"Serial elapsed: {result['serial_elapsed_seconds']:.2f}s")
 
-    if not result.get("stepper_command"):
+    if result.get("serial_actions"):
+        for action in result["serial_actions"]:
+            print(
+                f"State {action['state']} {action['name']}: "
+                f"status={action['serial_status']}, elapsed={action['elapsed_seconds']:.2f}s"
+            )
+            if dry_run:
+                print(f"Dry-run command: {action['command']!r}")
+            else:
+                print(f"Sent command: {action['command']!r}")
+                for reply in action["arduino_replies"]:
+                    print(f"Arduino reply: {reply}")
+    elif not result.get("stepper_command"):
         print("No stepper command needed")
     elif dry_run:
         print(f"Dry-run command: {result['stepper_command']!r}")
@@ -214,6 +235,15 @@ def run_motor1_correction(
     result["stepper_command"] = command
     if args.dry_run:
         result["serial_status"] = "dry_run"
+        record_serial_action(
+            result=result,
+            state=STATE_MOTOR1_CORRECT,
+            name="motor1_correction",
+            command=command,
+            replies=[],
+            status="dry_run",
+            elapsed_seconds=0.0,
+        )
         return
 
     started_at = time.monotonic()
@@ -222,6 +252,15 @@ def run_motor1_correction(
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
     result["serial_status"] = classify_serial_status(replies)
+    record_serial_action(
+        result=result,
+        state=STATE_MOTOR1_CORRECT,
+        name="motor1_correction",
+        command=sent_command,
+        replies=replies,
+        status=result["serial_status"],
+        elapsed_seconds=result["serial_elapsed_seconds"],
+    )
 
 
 def run_motor2_cycle(
@@ -238,6 +277,15 @@ def run_motor2_cycle(
     result["stepper_command"] = command
     if args.dry_run:
         result["serial_status"] = "dry_run"
+        record_serial_action(
+            result=result,
+            state=STATE_MOTOR2_CYCLE,
+            name="motor2_cycle",
+            command=command,
+            replies=[],
+            status="dry_run",
+            elapsed_seconds=0.0,
+        )
         return
 
     started_at = time.monotonic()
@@ -246,6 +294,93 @@ def run_motor2_cycle(
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
     result["serial_status"] = classify_serial_status(replies)
+    record_serial_action(
+        result=result,
+        state=STATE_MOTOR2_CYCLE,
+        name="motor2_cycle",
+        command=sent_command,
+        replies=replies,
+        status=result["serial_status"],
+        elapsed_seconds=result["serial_elapsed_seconds"],
+    )
+
+
+def run_servo_sweep(
+    args: argparse.Namespace,
+    result: dict,
+    serial_client: stepper_control.StepperSerialClient | None,
+) -> None:
+    command = args.servo_sweep_command.strip()
+    result["servo_command"] = command
+    if args.dry_run:
+        record_serial_action(
+            result=result,
+            state=STATE_SERVO_SWEEP,
+            name="servo_sweep",
+            command=command,
+            replies=[],
+            status="dry_run",
+            elapsed_seconds=0.0,
+        )
+        result["serial_status"] = "dry_run"
+        return
+
+    started_at = time.monotonic()
+    sent_command, replies = send_raw_command(serial_client, command)
+    elapsed_seconds = time.monotonic() - started_at
+    result["serial_elapsed_seconds"] = (
+        result.get("serial_elapsed_seconds") or 0.0
+    ) + elapsed_seconds
+    result["servo_command"] = sent_command
+    result["arduino_replies"] = replies
+    result["serial_status"] = classify_serial_status(replies)
+    record_serial_action(
+        result=result,
+        state=STATE_SERVO_SWEEP,
+        name="servo_sweep",
+        command=sent_command,
+        replies=replies,
+        status=result["serial_status"],
+        elapsed_seconds=elapsed_seconds,
+    )
+
+
+def record_serial_action(
+    result: dict,
+    state: int,
+    name: str,
+    command: str,
+    replies: list[str],
+    status: str,
+    elapsed_seconds: float,
+) -> None:
+    serial_actions = result.setdefault("serial_actions", [])
+    serial_actions.append(
+        {
+            "state": state,
+            "name": name,
+            "command": command,
+            "arduino_replies": replies,
+            "serial_status": status,
+            "elapsed_seconds": elapsed_seconds,
+        }
+    )
+    result["serial_status"] = summarize_serial_actions(serial_actions)
+
+
+def summarize_serial_actions(serial_actions: list[dict]) -> str | None:
+    if not serial_actions:
+        return None
+
+    statuses = [action["serial_status"] for action in serial_actions]
+    if all(status == "dry_run" for status in statuses):
+        return "dry_run"
+    if all(status == "ok" for status in statuses):
+        return "ok"
+    for priority in ("timeout", "error_reply", "unknown_reply"):
+        if priority in statuses:
+            return priority
+    return statuses[-1]
 
 
 def classify_serial_status(replies: list[str]) -> str:
@@ -315,9 +450,12 @@ def run(args: argparse.Namespace) -> None:
             if steps == 0:
                 state = STATE_MOTOR2_CYCLE
                 result["state"] = state
-                result["state_transition"] = "0->2->0"
+                result["state_transition"] = "0->2->3->0"
                 result["double_decision"] = "target_in_range_run_motor2_cycle"
                 run_motor2_cycle(args=args, result=result, serial_client=serial_client)
+                state = STATE_SERVO_SWEEP
+                result["state"] = state
+                run_servo_sweep(args=args, result=result, serial_client=serial_client)
                 print_or_emit_result(args=args, result=result)
             else:
                 state = STATE_MOTOR1_CORRECT
