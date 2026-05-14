@@ -1,0 +1,96 @@
+{
+  "scan_time": "2026-05-13 21:12:37",
+  "scanned_index_range": "0-9",
+  "results": [
+    {
+      "camera_index": 0,
+      "status": "ok",
+      "image_file": "camera_0_20260513_211233.jpg",
+      "width": 640,
+      "height": 480,
+      "backend": "DSHOW",
+      "message": "Frame captured successfully"
+    },
+    {
+      "camera_index": 1,
+      "status": "ok",
+      "image_file": "camera_1_20260513_211234.jpg",
+      "width": 640,
+      "height": 480,
+      "backend": "DSHOW",
+      "message": "Frame captured successfully"
+    },
+    {
+      "camera_index": 2,
+      "status": "ok",
+      "image_file": "camera_2_20260513_211236.jpg",
+      "width": 640,
+      "height": 480,
+      "backend": "DSHOW",
+      "message": "Frame captured successfully"
+    },
+    {
+      "camera_index": 3,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 4,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 5,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 6,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 7,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 8,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    },
+    {
+      "camera_index": 9,
+      "status": "unavailable",
+      "image_file": null,
+      "width": null,
+      "height": null,
+      "backend": null,
+      "message": "Cannot open camera"
+    }
+  ]
+}

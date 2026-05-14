@@ -188,6 +188,8 @@ def print_result(result: dict, dry_run: bool) -> None:
         print(f"State transition: {result['state_transition']}")
     if result.get("serial_status"):
         print(f"Serial status: {result['serial_status']}")
+    if result.get("serial_elapsed_seconds") is not None:
+        print(f"Serial elapsed: {result['serial_elapsed_seconds']:.2f}s")
 
     if not result.get("stepper_command"):
         print("No stepper command needed")
@@ -214,7 +216,9 @@ def run_motor1_correction(
         result["serial_status"] = "dry_run"
         return
 
+    started_at = time.monotonic()
     sent_command, replies = serial_client.send(steps)
+    result["serial_elapsed_seconds"] = time.monotonic() - started_at
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
     result["serial_status"] = classify_serial_status(replies)
@@ -236,7 +240,9 @@ def run_motor2_cycle(
         result["serial_status"] = "dry_run"
         return
 
+    started_at = time.monotonic()
     sent_command, replies = send_raw_command(serial_client, command)
+    result["serial_elapsed_seconds"] = time.monotonic() - started_at
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
     result["serial_status"] = classify_serial_status(replies)
