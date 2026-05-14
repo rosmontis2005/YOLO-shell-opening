@@ -65,9 +65,9 @@ def annotate_and_save(
         2,
     )
 
-    out_dir = PROJECT_ROOT / "runs" / "detect" / "predict_loop"
+    out_dir = PROJECT_ROOT / "shot"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"camera{camera_index}.jpg"
+    out_path = out_dir / f"camera{camera_index}_loop_output.jpg"
     cv2.imwrite(str(out_path), image)
     return str(out_path)
 
