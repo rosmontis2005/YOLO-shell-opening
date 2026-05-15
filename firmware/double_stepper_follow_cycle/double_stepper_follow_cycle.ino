@@ -12,11 +12,12 @@ const int SERVO_PIN = 9;
 const int SERVO_MIN_DEG = 0;
 const int SERVO_MAX_DEG = 180;
 const int SERVO_STEP_DELAY_MS = 15;
+const int SERVO_SWEEP_CYCLES = 3;
 
 const bool M1_DIR_RIGHT = false;
 const bool M2_DIR_OUT = true;
-const int PULSE_US = 500;
-const long MAX_STEPS_PER_COMMAND = 100000;
+const int PULSE_US = 800;
+const long MAX_STEPS_PER_COMMAND = 300000;
 
 Servo sweepServo;
 String incoming;
@@ -72,14 +73,16 @@ void runMotor2Cycle(long oneWaySteps) {
 }
 
 void runServoSweep() {
-  for (int pos = SERVO_MIN_DEG; pos <= SERVO_MAX_DEG; pos += 1) {
-    sweepServo.write(pos);
-    delay(SERVO_STEP_DELAY_MS);
-  }
+  for (int cycle = 0; cycle < SERVO_SWEEP_CYCLES; cycle++) {
+    for (int pos = SERVO_MIN_DEG; pos <= SERVO_MAX_DEG; pos += 1) {
+      sweepServo.write(pos);
+      delay(SERVO_STEP_DELAY_MS);
+    }
 
-  for (int pos = SERVO_MAX_DEG; pos >= SERVO_MIN_DEG; pos -= 1) {
-    sweepServo.write(pos);
-    delay(SERVO_STEP_DELAY_MS);
+    for (int pos = SERVO_MAX_DEG; pos >= SERVO_MIN_DEG; pos -= 1) {
+      sweepServo.write(pos);
+      delay(SERVO_STEP_DELAY_MS);
+    }
   }
 }
 

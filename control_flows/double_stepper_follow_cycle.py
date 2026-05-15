@@ -70,17 +70,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", help="Stepper Arduino serial port, e.g. COM3")
     parser.add_argument("--baud", type=int, default=9600)
     parser.add_argument("--target-x", type=float, default=320)
-    parser.add_argument("--tolerance", type=float, default=20)
+    parser.add_argument("--tolerance", type=float, default=5)
     parser.add_argument(
         "--step-size",
         type=int,
-        default=100,
+        default=150,
         help="Motor 1 relative steps when target is outside tolerance.",
     )
     parser.add_argument(
         "--aux-steps",
         type=int,
-        default=10000,
+        default=30000,
         help="Motor 2 one-way steps for the out-and-back cycle.",
     )
     parser.add_argument(
@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ack-wait-seconds",
         type=float,
-        default=45,
+        default=180,
         help="Wait this long for Arduino to finish moving and reply OK:/ERR:.",
     )
     parser.add_argument(
@@ -167,6 +167,7 @@ def prepare_result(
     result["double_decision"] = "not_detected"
     result["state_transition"] = None
     result["serial_status"] = None
+    result["halt_reason"] = None
     return result
 
 
@@ -197,6 +198,8 @@ def print_result(result: dict, dry_run: bool) -> None:
         print(f"State transition: {result['state_transition']}")
     if result.get("serial_status"):
         print(f"Serial status: {result['serial_status']}")
+    if result.get("halt_reason"):
+        print(f"Halt reason: {result['halt_reason']}")
     if result.get("serial_elapsed_seconds") is not None:
         print(f"Serial elapsed: {result['serial_elapsed_seconds']:.2f}s")
 
@@ -393,6 +396,15 @@ def classify_serial_status(replies: list[str]) -> str:
     return "unknown_reply"
 
 
+def serial_action_succeeded(result: dict) -> bool:
+    return result.get("serial_status") in ("ok", "dry_run")
+
+
+def halt_on_serial_failure(result: dict, reason: str) -> None:
+    status = result.get("serial_status") or "unknown"
+    result["halt_reason"] = f"{reason}: serial_status={status}"
+
+
 def run(args: argparse.Namespace) -> None:
     weights_path = Path(args.weights).resolve() if args.weights else detect_loop.find_latest_weights()
     serial_client = None
@@ -453,9 +465,21 @@ def run(args: argparse.Namespace) -> None:
                 result["state_transition"] = "0->2->3->0"
                 result["double_decision"] = "target_in_range_run_motor2_cycle"
                 run_motor2_cycle(args=args, result=result, serial_client=serial_client)
+                if not serial_action_succeeded(result):
+                    result["state_transition"] = "0->2->halt"
+                    halt_on_serial_failure(result, "motor2 cycle did not finish before timeout")
+                    print_or_emit_result(args=args, result=result)
+                    break
+
                 state = STATE_SERVO_SWEEP
                 result["state"] = state
                 run_servo_sweep(args=args, result=result, serial_client=serial_client)
+                if not serial_action_succeeded(result):
+                    result["state_transition"] = "0->2->3->halt"
+                    halt_on_serial_failure(result, "servo sweep did not finish before timeout")
+                    print_or_emit_result(args=args, result=result)
+                    break
+
                 print_or_emit_result(args=args, result=result)
             else:
                 state = STATE_MOTOR1_CORRECT
@@ -468,6 +492,12 @@ def run(args: argparse.Namespace) -> None:
                     steps=steps,
                     serial_client=serial_client,
                 )
+                if not serial_action_succeeded(result):
+                    result["state_transition"] = "0->1->halt"
+                    halt_on_serial_failure(result, "motor1 correction did not finish before timeout")
+                    print_or_emit_result(args=args, result=result)
+                    break
+
                 print_or_emit_result(args=args, result=result)
 
             if args.once:
