@@ -32,18 +32,63 @@ def log(message: str, json_mode: bool) -> None:
 def send_raw_command(
     client: stepper_control.StepperSerialClient,
     command: str,
+    json_mode: bool = False,
+    progress_label: str | None = None,
 ) -> tuple[str, list[str]]:
     if client.ser is None or not client.ser.is_open:
         raise RuntimeError("Stepper serial port is not open")
 
     clean_command = command.rstrip("\r\n")
+    if progress_label:
+        log(
+            f"{progress_label}: sent {clean_command!r}; waiting up to "
+            f"{client.ack_wait_seconds:.0f}s for Arduino OK/ERR",
+            json_mode,
+        )
+
     client.ser.write((clean_command + "\n").encode("utf-8"))
     client.ser.flush()
-    replies = stepper_control.read_serial_lines(
+    replies = read_serial_lines_with_progress(
         client.ser,
         wait_seconds=client.ack_wait_seconds,
+        json_mode=json_mode,
+        progress_label=progress_label,
     )
     return clean_command, replies
+
+
+def read_serial_lines_with_progress(
+    ser,
+    wait_seconds: float,
+    json_mode: bool,
+    progress_label: str | None,
+    progress_interval_seconds: float = 10,
+) -> list[str]:
+    deadline = time.monotonic() + wait_seconds
+    started_at = time.monotonic()
+    next_progress_at = started_at + progress_interval_seconds
+    lines = []
+
+    while time.monotonic() < deadline:
+        line = ser.readline().decode("utf-8", errors="replace").strip()
+        now = time.monotonic()
+        if line:
+            lines.append(line)
+            if progress_label:
+                log(f"{progress_label}: Arduino reply: {line}", json_mode)
+            if line.startswith("OK:") or line.startswith("ERR:"):
+                break
+        elif progress_label and now >= next_progress_at:
+            elapsed_seconds = now - started_at
+            remaining_seconds = max(0, deadline - now)
+            log(
+                f"{progress_label}: still waiting... "
+                f"elapsed={elapsed_seconds:.0f}s, remaining={remaining_seconds:.0f}s",
+                json_mode,
+            )
+            next_progress_at = now + progress_interval_seconds
+
+    return lines
 
 
 def parse_args() -> argparse.Namespace:
@@ -292,7 +337,12 @@ def run_motor2_cycle(
         return
 
     started_at = time.monotonic()
-    sent_command, replies = send_raw_command(serial_client, command)
+    sent_command, replies = send_raw_command(
+        serial_client,
+        command,
+        json_mode=args.json,
+        progress_label=f"State {STATE_MOTOR2_CYCLE} motor2_cycle",
+    )
     result["serial_elapsed_seconds"] = time.monotonic() - started_at
     result["stepper_command"] = sent_command
     result["arduino_replies"] = replies
@@ -329,7 +379,12 @@ def run_servo_sweep(
         return
 
     started_at = time.monotonic()
-    sent_command, replies = send_raw_command(serial_client, command)
+    sent_command, replies = send_raw_command(
+        serial_client,
+        command,
+        json_mode=args.json,
+        progress_label=f"State {STATE_SERVO_SWEEP} servo_sweep",
+    )
     elapsed_seconds = time.monotonic() - started_at
     result["serial_elapsed_seconds"] = (
         result.get("serial_elapsed_seconds") or 0.0
@@ -464,6 +519,13 @@ def run(args: argparse.Namespace) -> None:
                 result["state"] = state
                 result["state_transition"] = "0->2->3->0"
                 result["double_decision"] = "target_in_range_run_motor2_cycle"
+                log(
+                    f"[{result['timestamp']}] Entering State {STATE_MOTOR2_CYCLE}: "
+                    f"target x={result['x_center']:.2f}, error={result['x_error']:.2f}, "
+                    f"confidence={result['confidence']:.4f}, motor 2 cycle, "
+                    f"one-way steps={abs(args.aux_steps)}",
+                    args.json,
+                )
                 run_motor2_cycle(args=args, result=result, serial_client=serial_client)
                 if not serial_action_succeeded(result):
                     result["state_transition"] = "0->2->halt"
@@ -473,6 +535,7 @@ def run(args: argparse.Namespace) -> None:
 
                 state = STATE_SERVO_SWEEP
                 result["state"] = state
+                log(f"Entering State {STATE_SERVO_SWEEP}: servo sweep", args.json)
                 run_servo_sweep(args=args, result=result, serial_client=serial_client)
                 if not serial_action_succeeded(result):
                     result["state_transition"] = "0->2->3->halt"
